@@ -13,42 +13,89 @@ public class TaskService {
         this.repository = repository;
     }
 
-    // Get all tasks
+    //  READ 
+
     public List<Task> getAllTasks() {
         return repository.findAll();
     }
 
-    // Get a single task — throws if not found
     public Task getTaskById(int id) {
+        validateId(id);
+
         Task task = repository.findById(id);
         if (task == null) {
             throw new IllegalArgumentException("Task with id " + id + " not found");
         }
+
         return task;
     }
 
-    // Create a new task — validates required fields
+    //  CREATE 
+
     public Task createTask(String title, String description) {
-        if (title == null || title.trim().isEmpty()) {
-            throw new IllegalArgumentException("Title is required");
-        }
-        return repository.save(title.trim(), description);
+        validateTitle(title);
+
+        String cleanTitle = title.trim();
+        String cleanDescription = (description != null) ? description.trim() : null;
+
+        return repository.save(cleanTitle, cleanDescription);
     }
 
-    // Update an existing task
+    // UPDATE
+
     public Task updateTask(int id, String title, String description, Task.Status status) {
-        Task task = repository.update(id, title, description, status);
+        validateId(id);
+
+        // Optional validation (only validate if provided)
+        if (title != null && title.isBlank()) {
+            throw new IllegalArgumentException("Title cannot be empty");
+        }
+
+        if (status != null && !isValidStatus(status)) {
+            throw new IllegalArgumentException("Invalid status value");
+        }
+
+        String cleanTitle = (title != null) ? title.trim() : null;
+        String cleanDescription = (description != null) ? description.trim() : null;
+
+        Task task = repository.update(id, cleanTitle, cleanDescription, status);
+
         if (task == null) {
             throw new IllegalArgumentException("Task with id " + id + " not found");
         }
+
         return task;
     }
 
-    // Delete a task
+    //  DELETE 
+
     public void deleteTask(int id) {
+        validateId(id);
+
         boolean deleted = repository.delete(id);
         if (!deleted) {
             throw new IllegalArgumentException("Task with id " + id + " not found");
         }
+    }
+
+    // VALIDATION 
+
+    private void validateId(int id) {
+        if (id <= 0) {
+            throw new IllegalArgumentException("Invalid task id");
+        }
+    }
+
+    private void validateTitle(String title) {
+        if (title == null || title.isBlank()) {
+            throw new IllegalArgumentException("Title is required");
+        }
+    }
+
+    private boolean isValidStatus(Task.Status status) {
+        for (Task.Status s : Task.Status.values()) {
+            if (s == status) return true;
+        }
+        return false;
     }
 }

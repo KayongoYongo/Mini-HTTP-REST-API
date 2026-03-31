@@ -5,6 +5,7 @@ import com.sun.net.httpserver.HttpHandler;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonSyntaxException;
 import model.Task;
 import service.TaskService;
 
@@ -26,90 +27,125 @@ public class TaskHandler implements HttpHandler {
     @Override
     public void handle(HttpExchange exchange) throws IOException {
         String method = exchange.getRequestMethod();
-        String path = exchange.getRequestURI().getPath(); // e.g. /tasks or /tasks/1
+        String path = exchange.getRequestURI().getPath();
 
         try {
             if (path.equals("/tasks")) {
-                if (method.equals("GET")) handleGetAll(exchange);
-                else if (method.equals("POST")) handleCreate(exchange);
-                else sendResponse(exchange, 405, "{\"error\":\"Method not allowed\"}");
+                switch (method) {
+                    case "GET":
+                        handleGetAll(exchange);
+                        break;
+                    case "POST":
+                        handleCreate(exchange);
+                        break;
+                    default:
+                        sendError(exchange, 405, "Method not allowed");
+                }
 
             } else if (path.matches("/tasks/\\d+")) {
                 int id = extractId(path);
-                if (method.equals("GET")) handleGetOne(exchange, id);
-                else if (method.equals("PUT")) handleUpdate(exchange, id);
-                else if (method.equals("DELETE")) handleDelete(exchange, id);
-                else sendResponse(exchange, 405, "{\"error\":\"Method not allowed\"}");
+
+                switch (method) {
+                    case "GET":
+                        handleGetOne(exchange, id);
+                        break;
+                    case "PUT":
+                        handleUpdate(exchange, id);
+                        break;
+                    case "DELETE":
+                        handleDelete(exchange, id);
+                        break;
+                    default:
+                        sendError(exchange, 405, "Method not allowed");
+                }
 
             } else {
-                sendResponse(exchange, 404, "{\"error\":\"Route not found\"}");
+                sendError(exchange, 404, "Route not found");
             }
 
         } catch (IllegalArgumentException e) {
-            // Validation or not-found errors from the service layer
-            String body = "{\"error\":\"" + e.getMessage() + "\"}";
-            int status = e.getMessage().contains("not found") ? 404 : 400;
-            sendResponse(exchange, status, body);
+            sendError(exchange, 400, e.getMessage());
 
         } catch (Exception e) {
-            sendResponse(exchange, 500, "{\"error\":\"Internal server error\"}");
+            e.printStackTrace(); // 🔥 VERY IMPORTANT FOR DEBUGGING
+            sendError(exchange, 500, "Internal server error");
         }
     }
 
-    // GET /tasks
+    // ------------------ HANDLERS ------------------
+
     private void handleGetAll(HttpExchange exchange) throws IOException {
         List<Task> tasks = taskService.getAllTasks();
-        sendResponse(exchange, 200, gson.toJson(tasks));
+        sendJson(exchange, 200, tasks);
     }
 
-    // GET /tasks/{id}
     private void handleGetOne(HttpExchange exchange, int id) throws IOException {
         Task task = taskService.getTaskById(id);
-        sendResponse(exchange, 200, gson.toJson(task));
+        if (task == null) {
+            throw new IllegalArgumentException("Task not found");
+        }
+        sendJson(exchange, 200, task);
     }
 
-    // POST /tasks
     private void handleCreate(HttpExchange exchange) throws IOException {
         JsonObject body = parseBody(exchange);
-        String title = body.has("title") ? body.get("title").getAsString() : null;
-        String description = body.has("description") ? body.get("description").getAsString() : null;
+
+        String title = getAsString(body, "title");
+        String description = getAsString(body, "description");
+
+        if (title == null || title.isBlank()) {
+            throw new IllegalArgumentException("Title is required");
+        }
 
         Task task = taskService.createTask(title, description);
-        sendResponse(exchange, 201, gson.toJson(task));
+        sendJson(exchange, 201, task);
     }
 
-    // PUT /tasks/{id}
     private void handleUpdate(HttpExchange exchange, int id) throws IOException {
         JsonObject body = parseBody(exchange);
-        String title = body.has("title") ? body.get("title").getAsString() : null;
-        String description = body.has("description") ? body.get("description").getAsString() : null;
+
+        String title = getAsString(body, "title");
+        String description = getAsString(body, "description");
         Task.Status status = null;
 
         if (body.has("status")) {
             try {
                 status = Task.Status.valueOf(body.get("status").getAsString().toUpperCase());
-            } catch (IllegalArgumentException e) {
-                sendResponse(exchange, 400, "{\"error\":\"Invalid status value\"}");
-                return;
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Invalid status value");
             }
         }
 
         Task task = taskService.updateTask(id, title, description, status);
-        sendResponse(exchange, 200, gson.toJson(task));
+        sendJson(exchange, 200, task);
     }
 
-    // DELETE /tasks/{id}
     private void handleDelete(HttpExchange exchange, int id) throws IOException {
         taskService.deleteTask(id);
-        sendResponse(exchange, 204, "");
+        exchange.sendResponseHeaders(204, -1);
     }
 
-    // --- Helpers ---
+    // ------------------ HELPERS ------------------
 
     private JsonObject parseBody(HttpExchange exchange) throws IOException {
         InputStream is = exchange.getRequestBody();
         String body = new String(is.readAllBytes(), StandardCharsets.UTF_8);
-        return JsonParser.parseString(body).getAsJsonObject();
+
+        if (body == null || body.isBlank()) {
+            throw new IllegalArgumentException("Request body is empty");
+        }
+
+        try {
+            return JsonParser.parseString(body).getAsJsonObject();
+        } catch (JsonSyntaxException e) {
+            throw new IllegalArgumentException("Invalid JSON format");
+        }
+    }
+
+    private String getAsString(JsonObject obj, String key) {
+        return obj.has(key) && !obj.get(key).isJsonNull()
+                ? obj.get(key).getAsString()
+                : null;
     }
 
     private int extractId(String path) {
@@ -117,17 +153,29 @@ public class TaskHandler implements HttpHandler {
         return Integer.parseInt(parts[parts.length - 1]);
     }
 
-    private void sendResponse(HttpExchange exchange, int statusCode, String response) throws IOException {
+    private void sendJson(HttpExchange exchange, int statusCode, Object data) throws IOException {
+        String response = gson.toJson(data);
         byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", "application/json");
-        exchange.sendResponseHeaders(statusCode, statusCode == 204 ? -1 : bytes.length);
 
-        if (statusCode != 204) {
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(bytes);
-            }
-        } else {
-            exchange.getResponseBody().close();
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(statusCode, bytes.length);
+
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(bytes);
+        }
+    }
+
+    private void sendError(HttpExchange exchange, int statusCode, String message) throws IOException {
+        JsonObject error = new JsonObject();
+        error.addProperty("error", message);
+
+        byte[] bytes = gson.toJson(error).getBytes(StandardCharsets.UTF_8);
+
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(statusCode, bytes.length);
+
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(bytes);
         }
     }
 }
