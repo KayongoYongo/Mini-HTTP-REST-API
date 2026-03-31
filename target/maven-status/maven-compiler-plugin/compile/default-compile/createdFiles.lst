@@ -1,0 +1,6 @@
+model\Task.class
+service\TaskService.class
+Server.class
+handler\TaskHandler.class
+repository\TaskRepository.class
+model\Task$Status.class
