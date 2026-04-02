@@ -300,4 +300,4 @@ Each class receives its dependencies through the constructor rather than creatin
 ## 👤 Author
 
 **Your Name**
-[GitHub](https://github.com/your-username) • [LinkedIn](https://linkedin.com/in/your-profile)
+[GitHub](https://github.com/KayongoYongo) • [LinkedIn](https://linkedin.com/in/samuel-kayongo-3ba7206a)
